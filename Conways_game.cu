@@ -101,6 +101,22 @@ __global__ void update(int* d_old, int* d_new, int width, int height) {
         else {
             shared_input[0][shared_y] = 0;
         }
+        if (threadIdx.y == 0) {  //考虑左上角(x-1,y-1)
+            if (x > 0 && y > 0) {
+                shared_input[0][0] = d_old[index - 1 - width];
+            }
+            else {
+                shared_input[0][0] = 0;
+            }
+        }
+        if (threadIdx.y == blockDim.y - 1) { //考虑左上角(x-1,y+1)
+            if (x > 0 && y < height - 1) {
+                shared_input[0][TILE_SIZE + 1] = d_old[index - 1 + width];
+            }
+            else {
+                shared_input[0][TILE_SIZE + 1] = 0;
+            }
+        }
     }
 
     if (threadIdx.x == blockDim.x - 1) {
@@ -110,8 +126,24 @@ __global__ void update(int* d_old, int* d_new, int width, int height) {
         else {
             shared_input[TILE_SIZE + 1][shared_y] = 0;
         }
-    }
 
+        if (threadIdx.y == 0) {  //考虑右上角(x+1,y-1)
+            if (x < width - 1 && y > 0) {
+                shared_input[TILE_SIZE + 1][0] = d_old[index + 1 - width];
+            }
+            else {
+                shared_input[TILE_SIZE + 1][0] = 0;
+            }
+        }
+        if (threadIdx.y == blockDim.y - 1) { //考虑右上角(x+1,y+1)
+            if (x < width - 1 && y < height - 1) {
+                shared_input[TILE_SIZE + 1][TILE_SIZE + 1] = d_old[index + 1 + width];
+            }
+            else {
+                shared_input[TILE_SIZE + 1][TILE_SIZE + 1] = 0;
+            }
+        }
+    }
 
     if (threadIdx.y == 0) {
         if (y > 0) {
@@ -130,7 +162,6 @@ __global__ void update(int* d_old, int* d_new, int width, int height) {
             shared_input[shared_x][TILE_SIZE + 1] = 0;
         }
     }
-
 
     //等待同一个block的所有线程把数据都写入共享内存
     __syncthreads();
