@@ -15,9 +15,9 @@
 #define USE_GPU 1
 
 // 细胞状态，0 表示死亡，1 表示存活
-int cells[2][HEIGHT][WIDTH] = { 0 };
+int h_cellls[2][HEIGHT][WIDTH] = { 0 };
 int now = 0;
-int* d_old, * d_new;
+int* d_cells[2];
 
 
 // 初始化细胞状态
@@ -25,7 +25,7 @@ void init_cells() {
     // 随机生成细胞状态
     for (int i = 0; i < HEIGHT; i++) {
         for (int j = 0; j < WIDTH; j++) {
-            cells[now][i][j] = (rand() % 20) == 0;
+            h_cellls[now][i][j] = (rand() % 20) == 0;
         }
     }
 }
@@ -41,7 +41,7 @@ void display() {
     glBegin(GL_POINTS);
     for (int i = 0; i < HEIGHT; i++) {
         for (int j = 0; j < WIDTH; j++) {
-            if (cells[now][i][j] == 1) {
+            if (h_cellls[now][i][j] == 1) {
                 glVertex2i(j, i);
             }
         }
@@ -53,14 +53,14 @@ void display() {
 // 更新细胞状态
 void update_cells() {
     int pre = now ^ 1;
-    memset(cells[now], 0, sizeof(cells[now]));
+    memset(h_cellls[now], 0, sizeof(h_cellls[now]));
     // 统计每个细胞周围的存活细胞数量
     for (int i = 0; i < HEIGHT; i++) {
         for (int j = 0; j < WIDTH; j++) {
             for (int y = i - 1; y <= i + 1; y++) {
                 for (int x = j - 1; x <= j + 1; x++) {
                     if (x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT && (x != j || y != i)) {
-                        cells[now][i][j] += cells[pre][y][x];
+                        h_cellls[now][i][j] += h_cellls[pre][y][x];
                     }
                 }
             }
@@ -69,7 +69,7 @@ void update_cells() {
     // 根据细胞状态和周围存活细胞数量更新细胞状态
     for (int i = 0; i < HEIGHT; i++) {
         for (int j = 0; j < WIDTH; j++) {
-            cells[now][i][j] = (cells[now][i][j] >= 3 && cells[now][i][j] <= 7);
+            h_cellls[now][i][j] = (h_cellls[now][i][j] >= 3 && h_cellls[now][i][j] <= 7);
         }
     }
 }
@@ -101,10 +101,10 @@ dim3 dimGrid((WIDTH + dimBlock.x - 1) / dimBlock.x, (HEIGHT + dimBlock.y - 1) / 
 // 计时器函数，每隔一定时间更新一次细胞状态，设置为144hz
 void timer(int value) {
     now ^= 1;
+    int pre = now ^ 1;
     if (USE_GPU) {
-        update <<<dimGrid, dimBlock >>> (d_old, d_new, WIDTH, HEIGHT);
-        cudaMemcpy(cells[now], d_new, WIDTH * HEIGHT * sizeof(int), cudaMemcpyDeviceToHost);
-        cudaMemcpy(d_old, d_new, WIDTH * HEIGHT * sizeof(int), cudaMemcpyDeviceToDevice);
+        update <<<dimGrid, dimBlock >>> (d_cells[pre], d_cells[now], WIDTH, HEIGHT);
+        cudaMemcpy(h_cellls[now], d_cells[now], WIDTH * HEIGHT * sizeof(int), cudaMemcpyDeviceToHost);
     }
     else {
         update_cells();
@@ -123,21 +123,19 @@ void init_window() {
 
 int main(int argc, char** argv) {
 
-
     // 初始化 屏幕
     glutInit(&argc, argv);
     init_window();
 
-    // 初始化cells
+    // 初始化h_cellls
     srand(time(NULL));
     init_cells();
 
     if (USE_GPU) {
-        cudaMalloc((void**)&d_old, WIDTH * HEIGHT * sizeof(int));
-        cudaMalloc((void**)&d_new, WIDTH * HEIGHT * sizeof(int));
-        cudaMemcpy(d_old, cells[now], WIDTH * HEIGHT * sizeof(int), cudaMemcpyHostToDevice);
+        cudaMalloc((void**)&d_cells[0], WIDTH * HEIGHT * sizeof(int));
+        cudaMalloc((void**)&d_cells[1], WIDTH * HEIGHT * sizeof(int));
+        cudaMemcpy(d_cells[now], h_cellls[now], WIDTH * HEIGHT * sizeof(int), cudaMemcpyHostToDevice);
     }
-
 
     // 注册回调函数
     glutDisplayFunc(display);
@@ -147,12 +145,9 @@ int main(int argc, char** argv) {
     // 进入循环
     glutMainLoop();
 
-
-
-
     if (USE_GPU) {
-        cudaFree(d_old);
-        cudaFree(d_new);
+        cudaFree(d_cells[0]);
+        cudaFree(d_cells[1]);
     }
     return 0;
 }
