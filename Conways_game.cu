@@ -90,78 +90,19 @@ __global__ void update(int* d_old, int* d_new, int width, int height) {
     int index = y * width + x;
     int shared_index = shared_y * (TILE_SIZE + 2) + shared_x;
 
-    shared_input[shared_x][shared_y] = d_old[index]; //每个线程先把自身对应位置的数据写入共享内存
+    //每个线程先把自身周围几个格子对应位置的数据写入共享内存
 
-    //位于线程块边界的线程，把与自身相邻的边界数据写入共享内存
 
-    if (threadIdx.x == 0) {
-        if (x > 0) {
-            shared_input[0][shared_y] = d_old[index - 1]; //(x,y)的左边(x-1,y)
-        }
-        else {
-            shared_input[0][shared_y] = 0;
-        }
-        if (threadIdx.y == 0) {  //考虑左上角(x-1,y-1)
-            if (x > 0 && y > 0) {
-                shared_input[0][0] = d_old[index - 1 - width];
-            }
-            else {
-                shared_input[0][0] = 0;
-            }
-        }
-        if (threadIdx.y == blockDim.y - 1) { //考虑左上角(x-1,y+1)
-            if (x > 0 && y < height - 1) {
-                shared_input[0][TILE_SIZE + 1] = d_old[index - 1 + width];
-            }
-            else {
-                shared_input[0][TILE_SIZE + 1] = 0;
-            }
+
+    bool valid_range = 0;
+    for (int i = -1; i <= 1; i++) {
+        for (int j = -1; j <= 1; j++) {
+            valid_range =  (x + i > 0) && (x + i < width) && (y + j > 0) && (y + j < height); //首先得在边界内
+            valid_range &= !( (i == 0) && (j == 0)); //然后得排除自身
+            shared_input[shared_x + i][shared_y + j] = valid_range && d_old[index + i + j * width];
         }
     }
-
-    if (threadIdx.x == blockDim.x - 1) {
-        if (x < width - 1) {
-            shared_input[TILE_SIZE + 1][shared_y] = d_old[index + 1];//(x,y)的右边(x+1,y)
-        }
-        else {
-            shared_input[TILE_SIZE + 1][shared_y] = 0;
-        }
-
-        if (threadIdx.y == 0) {  //考虑右上角(x+1,y-1)
-            if (x < width - 1 && y > 0) {
-                shared_input[TILE_SIZE + 1][0] = d_old[index + 1 - width];
-            }
-            else {
-                shared_input[TILE_SIZE + 1][0] = 0;
-            }
-        }
-        if (threadIdx.y == blockDim.y - 1) { //考虑右上角(x+1,y+1)
-            if (x < width - 1 && y < height - 1) {
-                shared_input[TILE_SIZE + 1][TILE_SIZE + 1] = d_old[index + 1 + width];
-            }
-            else {
-                shared_input[TILE_SIZE + 1][TILE_SIZE + 1] = 0;
-            }
-        }
-    }
-
-    if (threadIdx.y == 0) {
-        if (y > 0) {
-            shared_input[shared_x][0] = d_old[index - width];//(x,y)的上边(x,y-1)
-        }
-        else {
-            shared_input[shared_x][0] = 0;
-        }
-    }
-
-    if (threadIdx.y == blockDim.y - 1) {
-        if (y < height - 1) {
-            shared_input[shared_x][TILE_SIZE + 1] = d_old[index + width];//(x,y)的下边(x,y+1)
-        }
-        else {
-            shared_input[shared_x][TILE_SIZE + 1] = 0;
-        }
-    }
+    
 
     //等待同一个block的所有线程把数据都写入共享内存
     __syncthreads();
@@ -172,9 +113,7 @@ __global__ void update(int* d_old, int* d_new, int width, int height) {
             count += shared_input[shared_x + i][shared_y + j];
         }
     }
-
     d_new[index] = (Lowbound <= count && count <= Upbound);
-
 }
 dim3 dimBlock(TILE_SIZE, TILE_SIZE);
 dim3 dimGrid((WIDTH + dimBlock.x - 1) / dimBlock.x, (HEIGHT + dimBlock.y - 1) / dimBlock.y);
