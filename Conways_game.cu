@@ -13,6 +13,7 @@
 #define COLOR_RANGE 256
 #define HZ 144
 #define USE_GPU 1
+#define TILE_SIZE 32
 
 // 细胞状态，0 表示死亡，1 表示存活
 int h_cellls[2][HEIGHT][WIDTH] = { 0 };
@@ -80,22 +81,75 @@ __global__ void update(int* d_old, int* d_new, int width, int height) {
 
     if (y >= height || x >= width) return;
 
+    __shared__ int shared_input[TILE_SIZE + 2][TILE_SIZE + 2]; 
+
+    int shared_x = threadIdx.x + 1;
+    int shared_y = threadIdx.y + 1;
+    int index = y * width + x;
+    int shared_index = shared_y * (TILE_SIZE + 2) + shared_x;
+
+    shared_input[shared_y][shared_x] = d_old[index]; //每个线程先把自身对应位置的数据写入共享内存
+
+    //位于线程块边界的线程，把与自身相邻的边界数据写入共享内存
+
+    if (threadIdx.x == 0) {
+        if (x > 0) {
+            shared_input[shared_y][0] = d_old[index - 1]; //(x,y)的左边(x-1,y)
+        }
+        else {
+            shared_input[shared_y][0] = 0;
+        }
+    }
+
+    if (threadIdx.x == blockDim.x - 1) {
+        if (x < width - 1) {
+            shared_input[shared_y][TILE_SIZE + 1] = d_old[index + 1];//(x,y)的右边(x+1,y)
+        }
+        else {
+            shared_input[shared_y][TILE_SIZE + 1] = 0;
+        }
+    }
+
+
+    if (threadIdx.y == 0) {
+        if (y > 0) {
+            shared_input[0][shared_x] = d_old[index - width];//(x,y)的上边(x,y-1)
+        }
+        else {
+            shared_input[0][shared_x] = 0;
+        }
+    }
+
+    if (threadIdx.y == blockDim.y - 1) {
+        if (y < height - 1) {
+            shared_input[TILE_SIZE + 1][shared_x] = d_old[index + width];//(x,y)的下边(x,y+1)
+        }
+        else {
+            shared_input[TILE_SIZE + 1][shared_x] = 0;
+        }
+    }
+
+
+    //等待同一个block的所有线程把数据都写入共享内存
+    __syncthreads();
+
     int count = 0;
-    for (int p = y - 1; p <= y + 1; p++) {
-        for (int q = x - 1; q <= x + 1; q++) {
-            if (p >= 0 && p < height && q >= 0 && q < width && !(p == y && q == x)) {
-                count += d_old[p * width + q];
+    for (int i =  - 1; i <=  + 1; i++) {
+        for (int j =  - 1; j <=  + 1; j++) {
+            if (!(i == 0 && j == 0)) {
+                count += shared_input[shared_x + i][shared_y + j];
             }
         }
     }
-    if (3<= count && count<=7) {
-        d_new[y * width + x] = 1;
+
+    if (3 <= count && count <=7) {
+        d_new[index] = 1;
     }
     else {
-        d_new[y * width + x] = 0;
+        d_new[index] = 0;
     }
 }
-dim3 dimBlock(32, 32);
+dim3 dimBlock(TILE_SIZE, TILE_SIZE);
 dim3 dimGrid((WIDTH + dimBlock.x - 1) / dimBlock.x, (HEIGHT + dimBlock.y - 1) / dimBlock.y);
 
 // 计时器函数，每隔一定时间更新一次细胞状态，设置为144hz
